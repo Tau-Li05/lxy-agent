@@ -1,0 +1,11 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema","$id":"sft-record-v1.schema.json","title":"SFT Record v1",
+  "type":"object","additionalProperties":false,"required":["schema_version","id","messages","metadata"],
+  "properties":{
+    "schema_version":{"const":"1.0"},"id":{"type":"string","minLength":1},
+    "messages":{"type":"array","minItems":2,"items":{"$ref":"#/$defs/message"},"contains":{"type":"object","properties":{"role":{"const":"assistant"}},"required":["role"]}},
+    "metadata":{"type":"object","required":["benchmark","split"]}
+  },
+  "$defs":{"message":{"type":"object","additionalProperties":false,"required":["role","content"],"properties":{"role":{"enum":["system","user","assistant","tool"]},"content":{"type":"string"},"name":{"type":"string"},"tool_call_id":{"type":"string"}}}}
+}
+

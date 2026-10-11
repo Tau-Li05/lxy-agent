@@ -1,0 +1,10 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema","$id":"rl-policy-v1.schema.json","title":"RL Policy Input v1",
+  "type":"object","additionalProperties":false,"required":["schema_version","id","input","metadata"],
+  "properties":{
+    "schema_version":{"const":"1.0"},"id":{"type":"string","minLength":1},
+    "input":{"$ref":"canonical-record-v1.schema.json#/$defs/input"},
+    "metadata":{"type":"object","required":["benchmark","split"]}
+  }
+}
+

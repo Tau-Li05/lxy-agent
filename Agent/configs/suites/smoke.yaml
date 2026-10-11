@@ -1,0 +1,48 @@
+schema_version: "1.0"
+kind: suite
+
+suite:
+  id: smoke
+  version: "1.0"
+  description: One-sample smoke run for every configured benchmark
+
+defaults:
+  runtime:
+    limits:
+      max_turns: 20
+      max_steps: 100
+      max_tool_calls: 80
+      tokens:
+        max_total: 16384
+        max_output_per_call: 4096
+      time:
+        sample_timeout_seconds: 600
+        tool_call_timeout_seconds: 60
+  execution:
+    retries: 0
+
+benchmarks:
+  - {config: ../benchmarks/competition_math.yaml, splits: [train], limit: 1}
+  - {config: ../benchmarks/aime24.yaml, splits: [test], limit: 1}
+  - {config: ../benchmarks/aime25.yaml, splits: [test], limit: 1}
+  - {config: ../benchmarks/aime26.yaml, splits: [test], limit: 1}
+  - {config: ../benchmarks/gaia.yaml, splits: [validation], limit: 1}
+  - {config: ../benchmarks/bfcl_v4.yaml, splits: [test], limit: 1}
+  - {config: ../benchmarks/gsm8k.yaml, splits: [test], limit: 1}
+  - {config: ../benchmarks/livebench_math.yaml, splits: [test], limit: 1}
+
+execution:
+  concurrency: 1
+  fail_fast: false
+  random_seed: 42
+
+aggregation:
+  composite_score: null
+  missing_result_policy: error
+
+report:
+  output_directory: ../../runs/${RUN_ID}
+  formats: [json, jsonl]
+  include_per_sample_results: true
+  include_resolved_config: true
+

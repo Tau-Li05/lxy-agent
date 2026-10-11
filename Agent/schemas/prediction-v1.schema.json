@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "prediction-v1.schema.json",
+  "title": "Prediction v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "status", "answer", "metadata", "error"],
+  "properties": {
+    "id": {"type": "string", "minLength": 1},
+    "status": {"enum": ["success", "invalid_input", "runtime_error", "timeout", "limit_exceeded", "invalid_prediction", "evaluator_error", "skipped", "error"]},
+    "answer": {"type": ["string", "null"]},
+    "metadata": {"type": "object"},
+    "error": {"type": ["object", "null"]}
+  }
+}

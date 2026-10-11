@@ -1,0 +1,97 @@
+schema_version: "1.0"
+kind: benchmark
+benchmark:
+  id: gaia
+  version: "2023-all"
+  protocol_version: "gaia-short-answer-v1"
+  description: General AI Assistants benchmark with tools and file attachments
+  task_type: agentic_question_answering
+  tags: [agent, tools, web, multimodal, files]
+dataset:
+  loader:
+    type: parquet
+    paths:
+      validation: ../../../benchmark/GAIA/2023/validation/metadata.parquet
+      test: ../../../benchmark/GAIA/2023/test/metadata.parquet
+    attachment_root: ../../../benchmark/GAIA
+  integrity:
+    expected_samples: {validation: 165, test: 301}
+    sha256:
+      validation: d9141bad0081af438d1ee36d188c5197035dc22a01f64e3f2ee17e45469518e9
+      test: 6fab73b48acadd363b4082d283d542702356177c76a0fc8ea84568978d4181d7
+  sample_id: {field: task_id, strategy: field}
+  fields:
+    question: Question
+    reference_answer: "Final answer"
+    difficulty: Level
+    attachment_name: file_name
+    attachment_path: file_path
+    annotator_metadata: "Annotator Metadata"
+  filters: []
+input_adapter:
+  type: gaia
+  input_fields: [Question, file_name, file_path]
+  template: |-
+    {{ Question }}
+
+    Give only the final short answer in the exact format requested by the task.
+  attachments:
+    path_field: file_path
+    name_field: file_name
+    omit_when_empty: true
+  output:
+    messages: [{role: user, content: "{{ rendered_input }}"}]
+agent_contract:
+  input_schema: agent-input/v1
+  output_schema: agent-output/v1
+  required_capabilities: [web_search, browser, code_execution, attachment_reading]
+  allowed_tools: [web_search, browser, python, file_reader]
+execution_environment:
+  dependencies: {type: current_environment}
+  sandbox:
+    type: process
+    network: restricted
+    filesystem: {dataset: read_only, workspace: read_write}
+runtime:
+  limits:
+    max_turns: 20
+    max_steps: 100
+    max_tool_calls: 80
+    tokens: {max_total: 65536, max_output_per_call: 8192}
+    time: {sample_timeout_seconds: 1800, tool_call_timeout_seconds: 120}
+  accounting: {failed_tool_calls: count, parallel_tool_calls: per_call, cached_model_calls: count}
+output_adapter:
+  type: final_answer
+  source: final_answer
+  on_no_match: invalid_prediction
+  output: {id_field: sample_id, prediction_field: answer}
+  normalization: [strip]
+reference_adapter:
+  type: field
+  source_field: reference_answer
+  output_field: reference
+  unavailable_values: ["?"]
+  normalization: [strip]
+submission:
+  builder: {type: jsonl, sort_by: sample_id, required_fields: [task_id, answer], missing_prediction_policy: error}
+  field_mapping: {sample_id: task_id, answer: answer}
+  output: {filename: gaia_predictions.jsonl}
+evaluator:
+  mode: split
+  routes:
+    validation:
+      type: builtin
+      implementation: gaia_exact_match
+      version: "1"
+      prediction_field: answer
+      reference_field: reference
+      metrics: [{id: accuracy, primary: true, direction: maximize, range: [0, 1]}]
+    test:
+      type: remote_submission
+      provider: gaia_leaderboard
+      endpoint_env: GAIA_EVALUATION_ENDPOINT
+      credential_env: GAIA_API_KEY
+      metrics: [{id: accuracy, primary: true, direction: maximize, range: [0, 1]}]
+reproducibility: {random_seed: 42, shuffle: false}
+provenance: {homepage: https://huggingface.co/gaia-benchmark, license: gated, citation: "Mialon et al., GAIA: a benchmark for General AI Assistants (2023)"}
+

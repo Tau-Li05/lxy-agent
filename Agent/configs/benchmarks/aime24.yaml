@@ -1,0 +1,67 @@
+schema_version: "1.0"
+kind: benchmark
+benchmark:
+  id: aime24
+  version: "2024"
+  protocol_version: "integer-answer-v1"
+  description: American Invitational Mathematics Examination 2024
+  task_type: question_answering
+  tags: [math, reasoning, aime]
+dataset:
+  loader:
+    type: jsonl
+    paths: {test: ../../../benchmark/aime24/aime24.jsonl}
+    encoding: utf-8
+  integrity:
+    expected_samples: {test: 30}
+    sha256: {test: 15867f261946a894f15364fb70171afed51ad470b38baad8c378c7d21bb7daef}
+  sample_id: {field: id, strategy: field}
+  fields: {question: problem, reference_answer: solution, source_url: url}
+  filters: []
+input_adapter:
+  type: template
+  input_fields: [problem]
+  template: |-
+    Solve the following AIME problem. Explain your reasoning and finish with
+    exactly: Final Answer: <integer>
+
+    {{ problem }}
+  output:
+    messages: [{role: user, content: "{{ rendered_input }}"}]
+agent_contract: {input_schema: agent-input/v1, output_schema: agent-output/v1, required_capabilities: [], allowed_tools: []}
+execution_environment: {dependencies: {type: current_environment}, sandbox: {type: none}}
+runtime:
+  limits:
+    max_turns: 1
+    max_steps: 20
+    max_tool_calls: 0
+    tokens: {max_total: 16384, max_output_per_call: 4096}
+    time: {sample_timeout_seconds: 300, tool_call_timeout_seconds: 30}
+  accounting: {failed_tool_calls: count, parallel_tool_calls: per_call, cached_model_calls: count}
+output_adapter:
+  type: regex_extract
+  source: final_answer
+  pattern: '(?i)(?:Final\s+Answer\s*:\s*|\\boxed\{)([0-9]{1,3})\}?'
+  on_no_match: invalid_prediction
+  output: {id_field: sample_id, prediction_field: answer}
+  normalization: [strip, integer_string]
+reference_adapter:
+  type: regex_extract
+  source_field: reference_answer
+  pattern: '\\boxed\{([0-9]{1,3})\}'
+  output_field: reference
+  normalization: [strip, integer_string]
+submission:
+  builder: {type: jsonl, sort_by: sample_id, required_fields: [sample_id, answer], missing_prediction_policy: error}
+  output: {filename: predictions.jsonl}
+evaluator:
+  mode: sample
+  type: builtin
+  implementation: exact_match
+  version: "1"
+  prediction_field: answer
+  reference_field: reference
+  metrics: [{id: accuracy, primary: true, direction: maximize, range: [0, 1]}]
+reproducibility: {random_seed: 42, shuffle: false}
+provenance: {homepage: https://huggingface.co/datasets/math-ai/aime24, license: Apache-2.0, citation: "Zhang and Math-AI Team, AIME 2024"}
+

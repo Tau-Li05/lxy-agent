@@ -1,0 +1,6 @@
+PyYAML>=6,<7
+jsonschema>=4.18,<5
+referencing>=0.30,<1
+langchain>=1,<2
+langchain-openai>=1,<2
+math-verify[antlr4_13_2]>=0.8,<1

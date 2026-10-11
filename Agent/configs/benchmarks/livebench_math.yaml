@@ -1,0 +1,56 @@
+schema_version: "1.0"
+kind: benchmark
+benchmark:
+  id: livebench_math
+  version: local-jsonl-snapshot
+  protocol_version: exact-match-v1
+  description: LiveBench mathematical reasoning tasks
+  task_type: question_answering
+  tags: [math, reasoning, livebench]
+dataset:
+  loader:
+    type: jsonl
+    paths: {test: ../../../benchmark/livebench_math/livebench_math_test.jsonl}
+    encoding: utf-8
+  integrity:
+    expected_samples: {test: 368}
+    sha256: {test: 7372214fb8c175364f2a3d813c9a043a4797dfac233648570722ab84a02713bf}
+  sample_id: {field: question_id, strategy: field}
+  fields: {messages: turns, reference_answer: ground_truth, category: category, task: task, subtask: subtask, year: year}
+  filters: []
+input_adapter:
+  type: messages_from_turns
+  input_fields: [turns]
+  preserve_turn_boundaries: true
+agent_contract: {input_schema: agent-input/v1, output_schema: agent-output/v1, required_capabilities: [], allowed_tools: []}
+execution_environment: {dependencies: {type: current_environment}, sandbox: {type: none}}
+runtime:
+  limits:
+    max_turns: 1
+    max_steps: 20
+    max_tool_calls: 0
+    tokens: {max_total: 32768, max_output_per_call: 8192}
+    time: {sample_timeout_seconds: 300, tool_call_timeout_seconds: 30}
+  accounting: {failed_tool_calls: count, parallel_tool_calls: per_call, cached_model_calls: count}
+output_adapter:
+  type: labeled_answer_extract
+  source: final_answer
+  label: "Answer:"
+  on_no_match: invalid_prediction
+  output: {id_field: sample_id, prediction_field: answer}
+  normalization: [strip]
+reference_adapter: {type: field, source_field: reference_answer, output_field: reference, normalization: [strip]}
+submission:
+  builder: {type: jsonl, sort_by: sample_id, required_fields: [sample_id, answer], missing_prediction_policy: error}
+  output: {filename: predictions.jsonl}
+evaluator:
+  mode: sample
+  type: builtin
+  implementation: exact_match
+  version: "1"
+  prediction_field: answer
+  reference_field: reference
+  metrics: [{id: accuracy, primary: true, direction: maximize, range: [0, 1]}]
+reproducibility: {random_seed: 42, shuffle: false}
+provenance: {homepage: https://livebench.ai/, license: null, citation: null}
+

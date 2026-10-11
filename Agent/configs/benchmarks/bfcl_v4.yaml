@@ -1,0 +1,80 @@
+schema_version: "1.0"
+kind: benchmark
+benchmark:
+  id: bfcl_v4
+  version: "local-repository-snapshot"
+  protocol_version: "official-bfcl-v4"
+  description: Berkeley Function Calling Leaderboard V4 official scoring suite
+  task_type: function_calling
+  tags: [agent, tools, function-calling, multi-turn]
+dataset:
+  loader:
+    type: bfcl_v4
+    root: ../../../benchmark/BFCL-main/berkeley-function-call-leaderboard
+    data_directory: bfcl_eval/data
+    categories: [all_scoring]
+  integrity:
+    expected_samples: {test: 4696}
+    sha256: {}
+  sample_id: {field: id, strategy: field}
+  fields:
+    messages: question
+    tools: function
+    initial_state: initial_config
+    involved_classes: involved_classes
+  filters: []
+input_adapter:
+  type: bfcl_v4
+  input_fields: [question, function]
+  preserve_turn_boundaries: true
+  output:
+    messages: "{{ question }}"
+    tools: "{{ function }}"
+agent_contract:
+  input_schema: agent-input/v1
+  output_schema: agent-output/v1
+  required_capabilities: [function_calling, multi_turn, parallel_tool_calls]
+  allowed_tools: [dataset_declared]
+execution_environment:
+  dependencies:
+    type: editable_project
+    path: ../../../benchmark/BFCL-main/berkeley-function-call-leaderboard
+    python: ">=3.10"
+  sandbox:
+    type: process
+    network: category_dependent
+    filesystem: {dataset: read_only, workspace: read_write}
+runtime:
+  limits:
+    max_turns: 20
+    max_steps: 100
+    max_tool_calls: 80
+    tokens: {max_total: 65536, max_output_per_call: 8192}
+    time: {sample_timeout_seconds: 600, tool_call_timeout_seconds: 120}
+  accounting: {failed_tool_calls: count, parallel_tool_calls: per_call, cached_model_calls: count}
+output_adapter:
+  type: bfcl_official_result
+  source: agent_output
+  on_no_match: invalid_prediction
+  output: {id_field: id, prediction_field: result}
+  normalization: []
+submission:
+  builder:
+    type: bfcl_official
+    group_by: category
+    sort_by: id
+    required_fields: [id, result]
+    missing_prediction_policy: error
+    model_name_env: BFCL_MODEL_NAME
+  output: {directory: "result/${BFCL_MODEL_NAME}"}
+evaluator:
+  mode: submission
+  type: command
+  working_directory: ../../../benchmark/BFCL-main/berkeley-function-call-leaderboard
+  command: [bfcl, evaluate, --model, "${BFCL_MODEL_NAME}", --test-category, all_scoring, --result-dir, "{{ submission_directory }}", --score-dir, "{{ score_directory }}"]
+  version: "BFCL V4 local snapshot"
+  metrics:
+    - {id: overall_accuracy, primary: true, direction: maximize, range: [0, 1]}
+reproducibility: {random_seed: 42, shuffle: false}
+provenance: {homepage: https://gorilla.cs.berkeley.edu/leaderboard.html, license: Apache-2.0, citation: "Patil et al., Berkeley Function Calling Leaderboard"}
+

@@ -1,0 +1,13 @@
+schema_version: "1.0"
+benchmark: livebench_math
+dataset_version: local-jsonl-snapshot
+adapter: livebench_math
+task_type: math_reasoning
+license: null
+sources:
+  - {path: ../../../benchmark/livebench_math/livebench_math_test.jsonl, source_split: test, split: test}
+expected_source_samples: 368
+source_sha256: 7372214fb8c175364f2a3d813c9a043a4797dfac233648570722ab84a02713bf
+metadata_fields: [category, task, subtask, year, hardness, livebench_release_date, livebench_removal_date, release_date]
+usage_by_split: {test: [test]}
+

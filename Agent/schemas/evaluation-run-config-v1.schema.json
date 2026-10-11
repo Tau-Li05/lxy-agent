@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "evaluation-run-config-v1.schema.json",
+  "title": "Evaluation Run Config v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "run_id", "benchmark", "evaluation_scope", "agent_config", "dataset", "output_root"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "run_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"},
+    "benchmark": {"const": "competition_math"},
+    "evaluation_scope": {"const": "development"},
+    "agent_config": {"type": "string", "minLength": 1},
+    "dataset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["inputs", "references"],
+      "properties": {
+        "inputs": {"type": "string", "minLength": 1},
+        "references": {"type": "string", "minLength": 1}
+      }
+    },
+    "output_root": {"type": "string", "minLength": 1}
+  }
+}

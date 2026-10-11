@@ -1,0 +1,16 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema","$id":"eval-reference-v1.schema.json","title":"DEV/TEST Reference v1",
+  "type":"object","additionalProperties":false,"required":["schema_version","id","evaluation_scope","target","reward","metadata"],
+  "properties":{
+    "schema_version":{"const":"1.0"},"id":{"type":"string","minLength":1},
+    "evaluation_scope":{"enum":["development","final_test"]},
+    "target":{"$ref":"canonical-record-v1.schema.json#/$defs/target"},
+    "reward":{"$ref":"canonical-record-v1.schema.json#/$defs/reward"},
+    "metadata":{"type":"object","required":["benchmark","split"]}
+  },
+  "allOf":[
+    {"if":{"properties":{"evaluation_scope":{"const":"development"}}},"then":{"properties":{"metadata":{"properties":{"split":{"const":"validation"}}}}}},
+    {"if":{"properties":{"evaluation_scope":{"const":"final_test"}}},"then":{"properties":{"metadata":{"properties":{"split":{"const":"test"}}}}}}
+  ]
+}
+

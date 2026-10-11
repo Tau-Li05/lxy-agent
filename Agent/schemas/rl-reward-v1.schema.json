@@ -1,0 +1,10 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema","$id":"rl-reward-v1.schema.json","title":"RL Reward Reference v1",
+  "type":"object","additionalProperties":false,"required":["schema_version","id","reward","metadata"],
+  "properties":{
+    "schema_version":{"const":"1.0"},"id":{"type":"string","minLength":1},
+    "reward":{"$ref":"canonical-record-v1.schema.json#/$defs/reward"},
+    "metadata":{"type":"object","required":["benchmark","split"]}
+  }
+}
+

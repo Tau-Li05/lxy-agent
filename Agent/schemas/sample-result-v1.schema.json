@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sample-result-v1.schema.json",
+  "title": "Sample Result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "status", "score", "correct", "prediction", "reference", "evaluation_scope", "split", "metadata", "error"],
+  "properties": {
+    "id": {"type": "string", "minLength": 1},
+    "status": {"type": "string", "minLength": 1},
+    "score": {"type": "number", "minimum": 0, "maximum": 1},
+    "correct": {"type": "boolean"},
+    "prediction": {"type": ["string", "null"]},
+    "reference": {"type": "string"},
+    "evaluation_scope": {"const": "development"},
+    "split": {"const": "validation"},
+    "metadata": {"type": "object"},
+    "error": {"type": ["object", "null"]}
+  }
+}

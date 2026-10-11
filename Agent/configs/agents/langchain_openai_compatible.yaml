@@ -1,0 +1,24 @@
+schema_version: "1.0"
+id: langchain-openai-compatible-math
+
+runtime:
+  type: langchain_create_agent
+  limits:
+    concurrency: 1
+    max_turns: 1
+    max_tool_calls: 0
+    max_steps: 8
+    sample_timeout_seconds: 180
+
+model:
+  provider: openai_compatible
+  model_env: MATH_AGENT_MODEL
+  base_url_env: MATH_AGENT_BASE_URL
+  api_key_env: MATH_AGENT_API_KEY
+  temperature: 0
+  max_retries: 0
+  max_output_tokens: 4096
+
+system_prompt: >-
+  You are a careful mathematical problem solver. Show concise reasoning and put
+  only the final answer inside \boxed{...}.
