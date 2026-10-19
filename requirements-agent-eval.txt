@@ -3,4 +3,10 @@ jsonschema>=4.18,<5
 referencing>=0.30,<1
 langchain>=1,<2
 langchain-openai>=1,<2
-math-verify[antlr4_13_2]>=0.8,<1
+langchain-ollama>=1,<2
+mpmath>=1.3,<2
+nltk>=3.8,<4
+# BFCL is loaded directly from benchmark/BFCL-main at runtime. Do not install
+# the full BFCL package: its isolated editable build downloads many unrelated
+# model-provider dependencies.
+
