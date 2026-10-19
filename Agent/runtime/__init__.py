@@ -1,3 +1,3 @@
-from .langchain_runtime import LangChainRuntime
+from .direct_runtime import DirectLangChainRuntime
 
-__all__ = ["LangChainRuntime"]
+__all__ = ["DirectLangChainRuntime"]

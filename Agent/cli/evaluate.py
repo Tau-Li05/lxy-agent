@@ -8,9 +8,10 @@ from Agent.evaluation.runner import execute_run
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Evaluate a LangChain agent on competition_math DEV")
+    parser = argparse.ArgumentParser(description="Run an Agent evaluation YAML")
     parser.add_argument("--config", type=Path, required=True, help="evaluation run YAML")
     parser.add_argument("--limit", type=int, help="evaluate only the first N records")
+    parser.add_argument("--profile", help="override model.default_profile")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--resume", action="store_true", help="continue an existing run")
     mode.add_argument("--rescore", action="store_true", help="reuse AgentOutput and rerun scoring")
@@ -29,6 +30,7 @@ def main() -> int:
             limit=args.limit,
             resume=args.resume,
             rescore=args.rescore,
+            profile=args.profile,
         )
     )
     print(output)

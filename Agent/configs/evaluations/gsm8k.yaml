@@ -1,0 +1,44 @@
+schema_version: "2.0"
+dataset:
+  name: gsm8k
+  path: ../../../data/evaluation/gsm8k_test.jsonl
+task_family: single_turn
+agent:
+  runtime: langchain
+  max_steps: 1
+  sample_timeout_seconds: 180
+tool:
+  enabled: false
+  provider: none
+  schema_source: none
+  execution: disabled
+model:
+  profiles:
+    v4flash:
+      name: DeepSeek-V4-Flash
+      context_window: 65536
+      max_tokens: 4096
+      temperature: 0
+      base_url_env: FIRE_AGENT_BASE_URL
+      api_key_env: FIRE_AGENT_API_KEY
+    pro:
+      name: deepseek-v4-pro
+      context_window: 65536
+      max_tokens: 4096
+      temperature: 0
+      base_url_env: FIRE_AGENT_BASE_URL
+      api_key_env: FIRE_AGENT_API_KEY
+    qwen3_5_9b:
+      provider: ollama
+      name: qwen3.5:9b
+      context_window: 65536
+      max_tokens: 4096
+      temperature: 0
+      host: http://127.0.0.1:11434
+      host_env: OLLAMA_HOST
+  default_profile: v4flash
+  reasoning: {enabled: false, mode: high}
+prompt:
+  system: >-
+    Solve the problem concisely. End with a final line containing only
+    #### <numeric answer>

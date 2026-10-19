@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "evaluation-record-v2.schema.json",
+  "type": "object",
+  "required": ["input", "reference"],
+  "additionalProperties": false,
+  "properties": {
+    "input": {
+      "type": "object",
+      "required": ["id", "task_family", "turns", "tools", "environment", "metadata"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "task_family": {"enum": ["single_turn", "multiturn"]},
+        "turns": {
+          "type": "array", "minItems": 1,
+          "items": {"type": "array", "items": {"$ref": "#/$defs/message"}}
+        },
+        "tools": {"type": "array", "items": {"type": "object"}},
+        "environment": {"type": "object"},
+        "metadata": {"type": "object"}
+      }
+    },
+    "reference": {"type": ["object", "null"]}
+  },
+  "$defs": {
+    "message": {
+      "type": "object", "required": ["role", "content"], "additionalProperties": true,
+      "properties": {"role": {"enum": ["system", "user", "assistant", "tool"]}, "content": {"type": "string"}}
+    }
+  }
+}

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from typing import Protocol, Sequence
+from typing import Any, Protocol, Sequence
 
 from .models import AgentInput, AgentOutput, BenchmarkMetrics, Prediction, Reference, SampleResult
 
 
 class AgentRuntime(Protocol):
-    async def run(self, agent_input: AgentInput) -> AgentOutput: ...
+    async def run(self, agent_input: dict[str, Any]) -> AgentOutput: ...
 
 
 class OutputAdapter(Protocol):

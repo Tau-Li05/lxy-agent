@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from Agent.data_pipeline.io import stable_json
+from .io import stable_json
 
 from .models import AgentOutput
 
