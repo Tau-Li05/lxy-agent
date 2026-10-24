@@ -1,0 +1,29 @@
+schema_version: "3.0"
+dataset: {name: bfcl, path: ../../../data/evaluation/bfcl_memory.jsonl}
+task_family: multiturn
+runtime: {kind: qwen_harness}
+agent: {max_steps: 20, sample_timeout_seconds: 600}
+tool: {enabled: true, provider: bfcl, schema_source: dataset, execution: enabled}
+model:
+  profiles:
+    qwen3_5_4b: {name: "qwen3.5:4b", provider: ollama, host_env: OLLAMA_HOST, context_window: 1331072, max_tokens: 16384, temperature: 0}
+    qwen3_5_9b: {name: "qwen3.5:9b", provider: ollama, host_env: OLLAMA_HOST, context_window: 1331072, max_tokens: 16384, temperature: 0}
+  default_profile: qwen3_5_9b
+  reasoning: {enabled: false, mode: high}
+prompt: {system: "Follow the memory protocol. Store durable facts during prerequisite conversations and use the memory tools to answer later questions."}
+features:
+  tools: {enabled: true, execution: true}
+  parallel_tools: {enabled: true, max_concurrency: 4}
+  planning: {enabled: false}
+  verification: {enabled: false}
+  compaction: {enabled: false}
+  self_correction: {enabled: false}
+  web_search: {enabled: false}
+  memory: {enabled: true, mode: bfcl_protocol}
+  math_tools: {mode: none}
+  output_recovery: {enabled: true, max_retries: 1}
+retry:
+  timeout: {enabled: true, max_retries: 2}
+  transport: {enabled: true, max_retries: 2}
+  malformed_response: {enabled: true, max_retries: 1}
+limits: {max_model_turns: 20, max_tool_calls: 80, max_total_tokens: 262144}

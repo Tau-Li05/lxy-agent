@@ -1,0 +1,160 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "run-config-v3.schema.json",
+  "type": "object",
+  "required": ["schema_version", "dataset", "task_family", "runtime", "agent", "tool", "model", "prompt", "features", "retry", "limits"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": "3.0"},
+    "dataset": {
+      "type": "object", "required": ["name", "path"], "additionalProperties": false,
+      "properties": {
+        "name": {"enum": ["gsm8k", "competition_math", "aime", "bfcl", "gaia", "locomo"]},
+        "path": {"type": "string", "minLength": 1}
+      }
+    },
+    "task_family": {"enum": ["single_turn", "multiturn"]},
+    "runtime": {
+      "type": "object", "required": ["kind"], "additionalProperties": false,
+      "properties": {"kind": {"enum": ["llm_direct", "bfcl_protocol", "qwen_harness"]}}
+    },
+    "agent": {
+      "type": "object", "required": ["max_steps", "sample_timeout_seconds"], "additionalProperties": false,
+      "properties": {
+        "max_steps": {"type": "integer", "minimum": 1},
+        "sample_timeout_seconds": {"type": "number", "exclusiveMinimum": 0}
+      }
+    },
+    "tool": {
+      "type": "object", "required": ["enabled", "provider", "schema_source", "execution"], "additionalProperties": false,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "provider": {"enum": ["none", "bfcl", "locomo_memory", "math", "gaia"]},
+        "schema_source": {"enum": ["none", "dataset", "registry"]},
+        "execution": {"enum": ["disabled", "enabled"]}
+      }
+    },
+    "model": {
+      "type": "object", "required": ["profiles", "default_profile", "reasoning"], "additionalProperties": false,
+      "properties": {
+        "profiles": {"type": "object", "minProperties": 1, "additionalProperties": {"$ref": "#/$defs/profile"}},
+        "default_profile": {"type": "string", "minLength": 1},
+        "reasoning": {
+          "type": "object", "required": ["enabled", "mode"], "additionalProperties": false,
+          "properties": {"enabled": {"type": "boolean"}, "mode": {"enum": ["low", "medium", "high"]}}
+        }
+      }
+    },
+    "prompt": {
+      "type": "object", "required": ["system"], "additionalProperties": false,
+      "properties": {"system": {"type": "string"}}
+    },
+    "features": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "system_prompt": {
+          "type": "object", "required": ["enabled", "base", "project_rules", "environment_info"], "additionalProperties": false,
+          "properties": {"enabled": {"type": "boolean"}, "base": {"type": "boolean"},
+            "project_rules": {"type": "boolean"}, "environment_info": {"type": "boolean"}}
+        },
+        "planning": {
+          "type": "object", "required": ["enabled"], "additionalProperties": false,
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "mode": {"enum": ["adaptive", "required"]},
+            "max_tasks": {"type": "integer", "minimum": 1},
+            "max_replans": {"type": "integer", "minimum": 0},
+            "require_verification_task": {"type": "boolean"}
+          }
+        },
+        "finalization": {"$ref": "#/$defs/switch"},
+        "difficulty_router": {
+          "type": "object", "required": ["enabled"], "additionalProperties": false,
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "method": {"enum": ["model_judgment"]},
+            "fallback": {"enum": ["direct", "agent"]}
+          }
+        },
+        "verification": {
+          "type": "object", "required": ["enabled"], "additionalProperties": false,
+          "properties": {"enabled": {"type": "boolean"}, "method": {"enum": ["self", "python", "python_sympy"]}}
+        },
+        "compaction": {
+          "type": "object", "required": ["enabled"], "additionalProperties": false,
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "trigger_ratio": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+            "target_ratio": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+            "tool_result_max_characters": {"type": "integer", "minimum": 1},
+            "tool_result_preview_characters": {"type": "integer", "minimum": 1},
+            "preserve_recent_messages": {"type": "integer", "minimum": 2},
+            "collapse_summary_characters": {"type": "integer", "minimum": 1}
+          }
+        },
+        "self_correction": {"$ref": "#/$defs/switch"},
+        "web_search": {
+          "type": "object", "required": ["enabled"], "additionalProperties": false,
+          "properties": {"enabled": {"type": "boolean"}, "mode": {"enum": ["live", "record", "replay"]}}
+        },
+        "memory": {
+          "type": "object", "required": ["enabled"], "additionalProperties": false,
+          "properties": {"enabled": {"type": "boolean"}, "mode": {"enum": ["full_context", "persistent", "bfcl_protocol", "none"]}}
+        },
+        "tools": {
+          "type": "object", "required": ["enabled", "execution"], "additionalProperties": false,
+          "properties": {"enabled": {"type": "boolean"}, "execution": {"type": "boolean"}}
+        },
+        "parallel_tools": {
+          "type": "object", "required": ["enabled"], "additionalProperties": false,
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "max_concurrency": {"type": "integer", "minimum": 1, "maximum": 32}
+          }
+        },
+        "math_tools": {
+          "type": "object", "required": ["mode"], "additionalProperties": false,
+          "properties": {"mode": {"enum": ["none", "python", "python_sympy"]}}
+        },
+        "output_recovery": {
+          "type": "object", "required": ["enabled", "max_retries"], "additionalProperties": false,
+          "properties": {"enabled": {"type": "boolean"}, "max_retries": {"type": "integer", "minimum": 0}}
+        }
+      }
+    },
+    "retry": {
+      "type": "object", "required": ["timeout", "transport", "malformed_response"], "additionalProperties": false,
+      "properties": {
+        "timeout": {"$ref": "#/$defs/retry"},
+        "transport": {"$ref": "#/$defs/retry"},
+        "malformed_response": {"$ref": "#/$defs/retry"}
+      }
+    },
+    "limits": {
+      "type": "object", "required": ["max_model_turns", "max_tool_calls", "max_total_tokens"], "additionalProperties": false,
+      "properties": {
+        "max_model_turns": {"type": "integer", "minimum": 1},
+        "max_tool_calls": {"type": "integer", "minimum": 0},
+        "max_total_tokens": {"type": "integer", "minimum": 1},
+        "context_window_override": {"type": ["integer", "null"], "minimum": 1}
+      }
+    }
+  },
+  "$defs": {
+    "switch": {"type": "object", "required": ["enabled"], "additionalProperties": false, "properties": {"enabled": {"type": "boolean"}}},
+    "retry": {"type": "object", "required": ["enabled", "max_retries"], "additionalProperties": false, "properties": {"enabled": {"type": "boolean"}, "max_retries": {"type": "integer", "minimum": 0}}},
+    "profile": {
+      "type": "object", "required": ["name", "context_window", "max_tokens", "temperature"], "additionalProperties": false,
+      "properties": {
+        "provider": {"enum": ["openai_compatible", "ollama"]},
+        "name": {"type": "string", "minLength": 1},
+        "context_window": {"type": "integer", "minimum": 1},
+        "max_tokens": {"type": "integer", "minimum": 1},
+        "temperature": {"type": "number"},
+        "seed": {"type": "integer"},
+        "base_url_env": {"type": "string"}, "api_key_env": {"type": "string"},
+        "host": {"type": "string"}, "host_env": {"type": "string"}
+      }
+    }
+  }
+}

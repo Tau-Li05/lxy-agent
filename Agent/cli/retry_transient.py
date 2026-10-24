@@ -10,10 +10,9 @@ from typing import Any
 from Agent.evaluation.checkpoints import append_checkpoint, load_checkpoints
 from Agent.evaluation.config import load_run_config, resolve_path
 from Agent.evaluation.direct_dataset import EvaluationRecord, load_evaluation_dataset
-from Agent.evaluation.direct_runner import _aggregate, _bfcl_submission, _score
+from Agent.evaluation.direct_runner import _aggregate, _bfcl_submission, _runtime_for, _score
 from Agent.evaluation.io import write_json, write_jsonl
 from Agent.evaluation.models import AgentOutput
-from Agent.runtime.direct_runtime import DirectLangChainRuntime
 
 
 logger = logging.getLogger(__name__)
@@ -87,7 +86,8 @@ async def retry_run(
         raise FileExistsError(f"retry output already exists: {destination}; use --resume")
     destination.mkdir(parents=True, exist_ok=True)
     retried = load_checkpoints(retry_checkpoint) if resume and retry_checkpoint.exists() else {}
-    runtime = DirectLangChainRuntime(config, project_root, profile)
+    runtime = _runtime_for(config, project_root, profile)
+    runtime.run_state_root = destination
     semaphore = asyncio.Semaphore(4)
 
     async def process(record: EvaluationRecord) -> AgentOutput:
@@ -147,7 +147,7 @@ async def retry_run(
 def _load_resolved_config(source_dir: Path, resolved_path: Path, project_root: Path) -> dict[str, Any]:
     if resolved_path.exists():
         return json.loads(resolved_path.read_text(encoding="utf-8"))
-    config_root = project_root / "Agent/configs/evaluations"
+    config_root = project_root / "Agent/configs/v3"
     for config_path in sorted(config_root.glob("*.yaml")):
         config = load_run_config(config_path, project_root / "Agent")
         for profile in config["model"]["profiles"]:

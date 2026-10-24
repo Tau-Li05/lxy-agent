@@ -1,12 +1,5 @@
-"""Framework-neutral agent evaluation primitives."""
+"""V3 agent evaluation primitives."""
 
-from .models import AgentInput, AgentOutput, BenchmarkMetrics, Prediction, Reference, SampleResult
+from .models import AgentOutput
 
-__all__ = [
-    "AgentInput",
-    "AgentOutput",
-    "BenchmarkMetrics",
-    "Prediction",
-    "Reference",
-    "SampleResult",
-]
+__all__ = ["AgentOutput"]

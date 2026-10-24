@@ -1,0 +1,29 @@
+schema_version: "3.0"
+dataset: {name: locomo, path: ../../../data/evaluation/locomo_10pct.jsonl}
+task_family: multiturn
+runtime: {kind: qwen_harness}
+agent: {max_steps: 20, sample_timeout_seconds: 3600}
+tool: {enabled: true, provider: locomo_memory, schema_source: dataset, execution: enabled}
+model:
+  profiles:
+    qwen3_5_4b: {provider: ollama, name: "qwen3.5:4b", context_window: 1331072, max_tokens: 16384, temperature: 0, host: "http://127.0.0.1:11434", host_env: OLLAMA_HOST}
+    qwen3_5_9b: {provider: ollama, name: "qwen3.5:9b", context_window: 1331072, max_tokens: 16384, temperature: 0, host: "http://127.0.0.1:11434", host_env: OLLAMA_HOST}
+  default_profile: qwen3_5_9b
+  reasoning: {enabled: false, mode: high}
+prompt: {system: "Store durable facts from each session and retrieve them to answer held-out questions."}
+features:
+  tools: {enabled: true, execution: true}
+  parallel_tools: {enabled: true, max_concurrency: 4}
+  planning: {enabled: false}
+  verification: {enabled: false}
+  compaction: {enabled: false}
+  self_correction: {enabled: false}
+  web_search: {enabled: false}
+  memory: {enabled: true, mode: persistent}
+  math_tools: {mode: none}
+  output_recovery: {enabled: false, max_retries: 0}
+retry:
+  timeout: {enabled: true, max_retries: 2}
+  transport: {enabled: true, max_retries: 2}
+  malformed_response: {enabled: true, max_retries: 2}
+limits: {max_model_turns: 20, max_tool_calls: 100, max_total_tokens: 262144}

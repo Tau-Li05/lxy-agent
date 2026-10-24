@@ -1,21 +1,9 @@
 from __future__ import annotations
 
-from typing import Any, Protocol, Sequence
+from typing import Any, Protocol
 
-from .models import AgentInput, AgentOutput, BenchmarkMetrics, Prediction, Reference, SampleResult
+from .models import AgentOutput
 
 
 class AgentRuntime(Protocol):
     async def run(self, agent_input: dict[str, Any]) -> AgentOutput: ...
-
-
-class OutputAdapter(Protocol):
-    def adapt(self, output: AgentOutput) -> Prediction: ...
-
-
-class Evaluator(Protocol):
-    def evaluate(self, prediction: Prediction, reference: Reference) -> SampleResult: ...
-
-
-class MetricAggregator(Protocol):
-    def aggregate(self, results: Sequence[SampleResult]) -> BenchmarkMetrics: ...

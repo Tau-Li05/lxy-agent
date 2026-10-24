@@ -1,0 +1,29 @@
+schema_version: "3.0"
+dataset: {name: bfcl, path: ../../../data/evaluation/bfcl_single_turn.jsonl}
+task_family: single_turn
+runtime: {kind: qwen_harness}
+agent: {max_steps: 1, sample_timeout_seconds: 180}
+tool: {enabled: true, provider: bfcl, schema_source: dataset, execution: disabled}
+model:
+  profiles:
+    qwen3_5_4b: {provider: ollama, name: "qwen3.5:4b", context_window: 1331072, max_tokens: 16384, temperature: 0, host: "http://127.0.0.1:11434", host_env: OLLAMA_HOST}
+    qwen3_5_9b: {provider: ollama, name: "qwen3.5:9b", context_window: 1331072, max_tokens: 16384, temperature: 0, host: "http://127.0.0.1:11434", host_env: OLLAMA_HOST}
+  default_profile: qwen3_5_9b
+  reasoning: {enabled: false, mode: high}
+prompt: {system: "Select the function calls that satisfy the request. Do not execute tools."}
+features:
+  tools: {enabled: true, execution: false}
+  parallel_tools: {enabled: true, max_concurrency: 2}
+  planning: {enabled: false, mode: adaptive, max_tasks: 5, max_replans: 1, require_verification_task: true}
+  verification: {enabled: false}
+  compaction: {enabled: false}
+  self_correction: {enabled: false}
+  web_search: {enabled: false}
+  memory: {enabled: false}
+  math_tools: {mode: none}
+  output_recovery: {enabled: false, max_retries: 0}
+retry:
+  timeout: {enabled: true, max_retries: 2}
+  transport: {enabled: true, max_retries: 2}
+  malformed_response: {enabled: true, max_retries: 2}
+limits: {max_model_turns: 1, max_tool_calls: 0, max_total_tokens: 262144}

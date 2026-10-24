@@ -15,7 +15,7 @@ class EvaluationRecord:
 
 
 def load_evaluation_dataset(path: Path, agent_root: Path, config: dict[str, Any]) -> list[EvaluationRecord]:
-    schema = json.loads((agent_root / "schemas/evaluation-record-v2.schema.json").read_text(encoding="utf-8"))
+    schema = json.loads((agent_root / "schemas/evaluation-record-v3.schema.json").read_text(encoding="utf-8"))
     validator = Draft202012Validator(schema)
     records: list[EvaluationRecord] = []
     ids: set[str] = set()
@@ -46,16 +46,29 @@ def _validate_semantics(item: dict[str, Any], config: dict[str, Any], path: Path
         raise ValueError(f"{prefix}: benchmark does not match dataset.name")
     if item["task_family"] == "single_turn" and len(item["turns"]) != 1:
         raise ValueError(f"{prefix}: single_turn requires exactly one turn")
-    if config["dataset"]["name"] in {"gsm8k", "aime"}:
-        if item["tools"] or config["tool"] != {"enabled": False, "provider": "none", "schema_source": "none", "execution": "disabled"}:
-            raise ValueError(f"{prefix}: math single-turn datasets must disable tools")
+    if config["dataset"]["name"] in {"gsm8k", "aime", "competition_math"}:
+        if config["tool"]["provider"] not in {"none", "math"}:
+            raise ValueError(f"{prefix}: v3 math tools must use provider=math")
     elif config["dataset"]["name"] == "locomo":
         questions = item["environment"].get("questions")
-        if (item["task_family"] != "multiturn" or not item["tools"] or not questions
-                or item["environment"].get("memory_backend") != "sqlite_fts5"
-                or config["tool"] != {"enabled": True, "provider": "locomo_memory",
-                                      "schema_source": "dataset", "execution": "enabled"}):
+        memory_feature = config.get("features", {}).get("memory", {})
+        memory_mode = memory_feature.get("mode", "persistent" if memory_feature.get("enabled") else "full_context")
+        context_mode = memory_mode in {"full_context", "none"}
+        memory_tool_valid = config["tool"] == {"enabled": True, "provider": "locomo_memory",
+                                                "schema_source": "dataset", "execution": "enabled"}
+        context_tool_valid = config["tool"] == {"enabled": False, "provider": "none",
+                                                 "schema_source": "none", "execution": "disabled"}
+        if (item["task_family"] != "multiturn" or not questions
+                or (not context_mode and (not item["tools"] or item["environment"].get("memory_backend") != "sqlite_fts5"))
+                or (context_mode and not context_tool_valid) or (not context_mode and not memory_tool_valid)):
             raise ValueError(f"{prefix}: LoCoMo requires session turns, sampled questions, and SQLite FTS5 tools")
+    elif config["dataset"]["name"] == "gaia":
+        if config["tool"]["provider"] != "gaia":
+            raise ValueError(f"{prefix}: GAIA requires the v3 GAIA tool provider")
+    elif item["metadata"].get("category", "").startswith("web_search"):
+        required = {"initial_config", "involved_classes"}
+        if config["tool"]["provider"] != "bfcl" or config["tool"]["execution"] != "enabled" or not required <= item["environment"].keys():
+            raise ValueError(f"{prefix}: BFCL web search requires its backend and initial state")
     elif item["task_family"] == "single_turn":
         is_irrelevance = "irrelevance" in item["metadata"].get("category", "")
         if (not item["tools"] and not is_irrelevance) or config["tool"]["execution"] != "disabled":

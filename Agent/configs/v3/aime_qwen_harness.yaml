@@ -1,0 +1,41 @@
+schema_version: "3.0"
+dataset: {name: aime, path: ../../../data/evaluation/aime.jsonl}
+task_family: single_turn
+runtime: {kind: qwen_harness}
+agent: {max_steps: 8, sample_timeout_seconds: 900}
+tool: {enabled: true, provider: math, schema_source: registry, execution: enabled}
+model:
+  profiles:
+    v4flash:
+      {provider: openai_compatible, name: DeepSeek-V4-Flash, context_window: 1331072, max_tokens: 16384,
+       temperature: 0, base_url_env: FIRE_AGENT_BASE_URL, api_key_env: FIRE_AGENT_API_KEY}
+    qwen3_5_4b:
+      {provider: ollama, name: "qwen3.5:4b", context_window: 1331072, max_tokens: 16384,
+       temperature: 0, host: "http://127.0.0.1:11434", host_env: OLLAMA_HOST}
+    qwen3_5_9b:
+      {provider: ollama, name: "qwen3.5:9b", context_window: 1331072, max_tokens: 16384,
+       temperature: 0, host: "http://127.0.0.1:11434", host_env: OLLAMA_HOST}
+  default_profile: qwen3_5_9b
+  reasoning: {enabled: false, mode: high}
+prompt:
+  system: >-
+    Solve the problem with concise visible steps. End with a final line containing only
+    #### <integer from 000 through 999>.
+features:
+  difficulty_router: {enabled: true, method: model_judgment, fallback: direct}
+  tools: {enabled: true, execution: true}
+  parallel_tools: {enabled: true, max_concurrency: 2}
+  planning: {enabled: true, mode: adaptive, max_tasks: 5, max_replans: 1, require_verification_task: true}
+  finalization: {enabled: true}
+  verification: {enabled: false}
+  compaction: {enabled: true}
+  self_correction: {enabled: false}
+  web_search: {enabled: false}
+  memory: {enabled: false}
+  math_tools: {mode: python_sympy}
+  output_recovery: {enabled: false, max_retries: 0}
+retry:
+  timeout: {enabled: true, max_retries: 2}
+  transport: {enabled: true, max_retries: 2}
+  malformed_response: {enabled: true, max_retries: 2}
+limits: {max_model_turns: 12, max_tool_calls: 20, max_total_tokens: 262144}

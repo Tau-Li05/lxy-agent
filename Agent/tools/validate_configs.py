@@ -18,11 +18,10 @@ AGENT_ROOT = ROOT / "Agent"
 def main() -> int:
     errors: list[str] = []
     checked = 0
-    for path in sorted((AGENT_ROOT / "configs/evaluations").glob("*.yaml")):
+    paths = list((AGENT_ROOT / "configs/v3").glob("*.yaml"))
+    for path in sorted(paths):
         try:
             config = load_run_config(path, AGENT_ROOT)
-            if config.get("schema_version") != "2.0":
-                continue
             dataset = resolve_path(config["dataset"]["path"], path, ROOT)
             load_evaluation_dataset(dataset, AGENT_ROOT, config)
             checked += 1
@@ -33,7 +32,7 @@ def main() -> int:
         for error in errors:
             print(f"- {error}", file=sys.stderr)
         return 1
-    print(json.dumps({"valid_v2_configs": checked}, ensure_ascii=False))
+    print(json.dumps({"valid_configs": checked}, ensure_ascii=False))
     return 0
 
 

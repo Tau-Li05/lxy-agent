@@ -1,0 +1,17 @@
+schema_version: "3.0"
+dataset: {name: bfcl, path: ../../../data/evaluation/bfcl_web_search.jsonl}
+task_family: single_turn
+runtime: {kind: bfcl_protocol}
+agent: {max_steps: 20, sample_timeout_seconds: 600}
+tool: {enabled: true, provider: bfcl, schema_source: dataset, execution: enabled}
+model:
+  profiles:
+    v4flash: {provider: openai_compatible, name: deepseek-v4.1-flash-1017, context_window: 1331072, max_tokens: 16384, temperature: 0, base_url_env: FIRE_AGENT_BASE_URL, api_key_env: FIRE_AGENT_API_KEY}
+    qwen3_5_4b: {provider: ollama, name: "qwen3.5:4b", context_window: 1331072, max_tokens: 16384, temperature: 0, host: "http://127.0.0.1:11434", host_env: OLLAMA_HOST}
+    qwen3_5_9b: {provider: ollama, name: "qwen3.5:9b", context_window: 1331072, max_tokens: 16384, temperature: 0, host: "http://127.0.0.1:11434", host_env: OLLAMA_HOST}
+  default_profile: v4flash
+  reasoning: {enabled: false, mode: high}
+prompt: {system: "Use the provided web tools until you can answer the question. Give a concise final answer."}
+features: {tools: {enabled: true, execution: true}, planning: {enabled: false}, verification: {enabled: false}, compaction: {enabled: false}, self_correction: {enabled: false}, web_search: {enabled: true}, memory: {enabled: false}, math_tools: {mode: none}, output_recovery: {enabled: false, max_retries: 0}}
+retry: {timeout: {enabled: true, max_retries: 2}, transport: {enabled: true, max_retries: 2}, malformed_response: {enabled: false, max_retries: 0}}
+limits: {max_model_turns: 20, max_tool_calls: 20, max_total_tokens: 262144}
