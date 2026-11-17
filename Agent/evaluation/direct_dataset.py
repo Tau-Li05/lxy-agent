@@ -53,7 +53,7 @@ def _validate_semantics(item: dict[str, Any], config: dict[str, Any], path: Path
         questions = item["environment"].get("questions")
         memory_feature = config.get("features", {}).get("memory", {})
         memory_mode = memory_feature.get("mode", "persistent" if memory_feature.get("enabled") else "full_context")
-        context_mode = memory_mode in {"full_context", "none"}
+        context_mode = memory_mode in {"full_context", "recent_window", "bm25_rag", "vector_rag", "session_summary", "remem_v1", "none"}
         memory_tool_valid = config["tool"] == {"enabled": True, "provider": "locomo_memory",
                                                 "schema_source": "dataset", "execution": "enabled"}
         context_tool_valid = config["tool"] == {"enabled": False, "provider": "none",

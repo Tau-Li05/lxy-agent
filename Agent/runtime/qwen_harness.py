@@ -11,21 +11,54 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-from Agent.engine import AgentPhase, AgentState, ContextManager, Transition, TransitionKind, execute_parallel
+from Agent.engine import AgentPhase, AgentState, ContextManager, Transition, TransitionKind, execute_parallel, estimate_tokens
 from Agent.evaluation.models import AgentOutput
 from Agent.runtime.direct_runtime import (
     DirectLangChainRuntime, _accumulate_usage, _call_string, _content_text, _done_reason,
     _empty_usage, _invoke_with_xml_retry, _malformed_retry_limit, _openai_tool, _response_usage,
     _serialize_message, _tool_calls,
 )
+from Agent.runtime.math_workflow import MathEvidence
 from Agent.runtime.bfcl_executor import ToolExecutionResult
 from Agent.telemetry import RunRecorder
-from Agent.tools.math_tools import execute_math_tool, math_tool_schemas
+from Agent.tools.math_tools import MathToolResult, MathToolSession, math_tool_schemas
 from Agent.prompting import SystemPromptBuilder
 from Agent.tools.gaia_tools import GAIA_TOOLS, execute_gaia_tool
 
 
 _PLANNING_TOOL_NAMES = {"create_plan", "task_list", "task_update"}
+
+
+def _output_budget(model: Any, profile: dict[str, Any], tokens: int) -> Any:
+    """Bind request-local generation limits without mutating a shared model."""
+    if hasattr(model, "bind"):
+        if profile.get("provider") == "ollama":
+            # ChatOllama accepts per-request sampling limits under options, not as
+            # top-level num_predict. Supplying options replaces its default map.
+            base = getattr(model, "bound", model)
+            names = ("mirostat", "mirostat_eta", "mirostat_tau", "num_ctx", "num_gpu",
+                     "num_thread", "repeat_last_n", "repeat_penalty", "temperature",
+                     "seed", "stop", "tfs_z", "top_k", "top_p")
+            options = {name: getattr(base, name) for name in names if getattr(base, name, None) is not None}
+            options.setdefault("num_ctx", profile["context_window"])
+            options.setdefault("temperature", profile["temperature"])
+            if "seed" in profile:
+                options.setdefault("seed", profile["seed"])
+            options.update((getattr(model, "kwargs", {}) or {}).get("options", {}) or {})
+            options["num_predict"] = tokens
+            return model.bind(options=options)
+        return model.bind(max_tokens=tokens)
+    return model  # Lightweight injected models may not expose LangChain binding.
+
+
+def _request_budget(messages: list[Any], tools: list[dict[str, Any]], remaining: int,
+                    max_output: int, final_output: int) -> tuple[int, int]:
+    # Include schemas and protocol overhead. This is an estimate, not provider tokenization.
+    prompt = int(1.25 * estimate_tokens([*messages, {"tools": tools}])) + 128
+    # Reserve a second input (including this output and a short tool result) and final output.
+    normal = min(max_output, max(0, (remaining - 2 * prompt - final_output - 512) // 2))
+    final = min(max_output, final_output, max(0, remaining - prompt - 128))
+    return normal, final
 
 
 def _planning_tools() -> list[dict[str, Any]]:
@@ -275,7 +308,27 @@ class QwenHarnessRuntime(DirectLangChainRuntime):
         tools = deepcopy(item["tools"]) if tools_enabled else []
         math_mode = self.features.get("math_tools", {}).get("mode", "none")
         if tools_enabled and self.config["tool"]["provider"] == "math":
-            tools = math_tool_schemas(math_mode)
+            tools = math_tool_schemas(math_mode, candidate_protocol=bool(
+                self.features.get("math_tools", {}).get("candidate_protocol", False)))
+            base_system += (
+                "\nUse exact_calculate for short numeric expressions and python_calculate for enumeration "
+                "or symbolic work (SymPy is available through Python). Before computing, identify the "
+                "original constraints and finite search bounds. Keep code and comments short; print only "
+                "relevant results. A successful execution does not prove the model or search is complete. "
+                "Inspect structured errors and revise failed code; never repeat an identical failed call. "
+                "After obtaining useful results, check original constraints and finish concisely."
+            )
+            if self.features.get("math_tools", {}).get("pre_final_audit", False):
+                base_system += (
+                    "\nBefore a long derivation, identify the exact quantity and answer format requested, "
+                    "and copy any easily confused signs, operators, indices, or geometric conditions "
+                    "from the problem. Use concise steps; do not list many routine cases in prose. "
+                    "For a search, derive its range, test the original conditions in code, and report "
+                    "how many cases were checked and which passed. Before treating a calculation as "
+                    "an answer, check that it is the requested quantity, all constraints hold, and "
+                    "simple invariants or stated answer forms agree. If a check fails, correct the "
+                    "interpretation or method before continuing; label guesses and intermediate values."
+                )
         if tools_enabled and self.config["tool"]["provider"] == "gaia":
             tools = deepcopy(GAIA_TOOLS)
         planning = self.features.get("planning", {}) if agent_route else {"enabled": False}
@@ -316,8 +369,22 @@ class QwenHarnessRuntime(DirectLangChainRuntime):
         answer_before_verification: str | None = None
         compaction_count = 0
         finalization_started = False
+        requested_finalization_reason: str | None = None
+        repair_prompt: str | None = None
+        tool_budget_exhausted = False
         transition_count = 0
         compaction_checked_turn = -1
+        math_options = self.features.get("math_tools", {})
+        pre_final_audit_sent = False
+        bounded_turn_continuations = 0
+        math_workflow_enabled = (self.config["tool"]["provider"] == "math"
+                                 and bool(math_options.get("workflow_enabled", False)) and len(turns) == 1)
+        math_evidence = MathEvidence()
+        math_session = MathToolSession(cache_successes=math_workflow_enabled
+                                       and bool(math_options.get("cache_successes", False)),
+                                       repair_turn_enabled=bool(math_options.get("repair_turn_enabled", False)))
+        finalization = self.features.get("finalization", {})
+        final_output_tokens = min(int(self.profile["max_tokens"]), int(finalization.get("max_tokens", 2048)))
         context_manager = ContextManager.from_config(
             self.features.get("compaction", {}), self.profile,
             self.config.get("limits", {}).get("context_window_override"),
@@ -334,6 +401,7 @@ class QwenHarnessRuntime(DirectLangChainRuntime):
 
         def advance_turn_or_finish() -> None:
             nonlocal turn_index, current_turn_calls, verification_active, answer_before_verification
+            nonlocal finalization_started, requested_finalization_reason
             calls_by_turn.append(current_turn_calls)
             if turn_index + 1 >= len(turns):
                 set_transition(TransitionKind.FINISH, "all user turns completed")
@@ -349,6 +417,8 @@ class QwenHarnessRuntime(DirectLangChainRuntime):
             current_turn_calls = []
             verification_active = False
             answer_before_verification = None
+            finalization_started = False
+            requested_finalization_reason = None
             recorder.event("user_turn_started", {"turn_index": turn_index, "messages": next_turn}, attempt_id=attempt)
             set_transition(TransitionKind.CALL_MODEL, "next user turn")
 
@@ -371,6 +441,9 @@ class QwenHarnessRuntime(DirectLangChainRuntime):
                 compaction_checked_turn = state.model_turn_count
                 result = context_manager.compact(state.messages, artifact_writer=recorder.artifact)
                 state.messages = result.messages
+                for question_message in reversed(turns[turn_index]):
+                    if question_message not in state.messages:
+                        state.messages.insert(1 if system else 0, deepcopy(question_message))
                 if result.changed:
                     compaction_count += 1
                     recorder.event("context_compacted", {
@@ -437,6 +510,18 @@ class QwenHarnessRuntime(DirectLangChainRuntime):
             if transition.kind == TransitionKind.EXECUTE_TOOLS:
                 calls = list(state.pending_tool_calls)
                 if state.tool_call_count + len(calls) > max_tool_calls:
+                    if finalization.get("enabled"):
+                        tool_budget_exhausted = True
+                        for call in calls:
+                            message = {"role": "tool", "tool_call_id": call["id"], "content": json.dumps({
+                                "success": False, "error_type": "tool_budget", "message": "Tool batch exceeds remaining call budget. Finish using existing evidence."
+                            })}
+                            state.messages.append(message)
+                            serialized.append(message)
+                        state.pending_tool_calls = []
+                        recorder.event("tool_batch_budget_rejected", {"call_count": len(calls)}, attempt_id=attempt)
+                        set_transition(TransitionKind.CALL_MODEL, "reserve final answer after tool budget rejection")
+                        continue
                     state.error = {"type": "max_tool_calls", "message": "tool call budget exhausted"}
                     set_transition(TransitionKind.FAIL, "tool call budget exhausted")
                     continue
@@ -472,7 +557,8 @@ class QwenHarnessRuntime(DirectLangChainRuntime):
                     serialized.append(message)
                 unplanned_calls: list[dict[str, Any]] = []
                 if state.current_plan and not state.current_plan.get("active_task_id"):
-                    unplanned_calls, external_calls = external_calls, []
+                    unplanned_calls = list(external_calls)
+                    external_calls = []
                 for call in unplanned_calls:
                     content = "External action rejected: mark one runnable plan task in_progress first."
                     message = {"role": "tool", "tool_call_id": call["id"], "content": content}
@@ -494,7 +580,10 @@ class QwenHarnessRuntime(DirectLangChainRuntime):
                 if self.config["tool"]["provider"] in {"math", "gaia"}:
                     async def execute_external(call: dict[str, Any]) -> Any:
                         if self.config["tool"]["provider"] == "math":
-                            return await asyncio.to_thread(execute_math_tool, call["name"], call["args"])
+                            return await asyncio.to_thread(
+                                math_session.execute, call["name"], call["args"],
+                                timeout_seconds=float(math_options.get("timeout_seconds", 5)),
+                            )
                         return await asyncio.to_thread(
                             execute_gaia_tool, call["name"], call["args"], item["environment"]
                         )
@@ -533,6 +622,12 @@ class QwenHarnessRuntime(DirectLangChainRuntime):
                 current_turn_calls.append(call_strings)
                 state.tool_call_count += len(calls)
                 for call, result in zip(external_calls, results):
+                    if math_workflow_enabled:
+                        evidence_row = math_evidence.observe(call, result)
+                        state.math_evidence = math_evidence.snapshot()
+                        recorder.event("math_evidence_updated", evidence_row, attempt_id=attempt)
+                        if evidence_row["cached"]:
+                            recorder.event("tool_success_reused", {"call_id": call["id"]}, attempt_id=attempt)
                     result_payload: Any = result
                     if len(result.output) > 2000:
                         artifact = recorder.artifact({"tool": call["name"], "output": result.output})
@@ -557,6 +652,29 @@ class QwenHarnessRuntime(DirectLangChainRuntime):
                         except (ValueError, TypeError):
                             event_payload["ranked_results"] = []
                     recorder.event(event_type, event_payload, attempt_id=attempt)
+                    if result.error and result.error.get("type") in {"duplicate_failed_call", "repair_required"}:
+                        recorder.event("tool_failure_deduplicated", {"call_id": call["id"], "name": call["name"]},
+                                       attempt_id=attempt)
+                    if result.error and result.error.get("type") == "repair_required":
+                        previous = json.loads(result.output).get("previous_error") or {}
+                        repair_prompt = (
+                            "Tool use is paused for one turn. Explain briefly why the previous "
+                            f"{call['name']} call failed ({previous.get('type', 'unknown')}: "
+                            f"{previous.get('message', 'no details')}) and state a specific change "
+                            "to the code, search bounds, or algorithm. Do not call tools or give a final answer "
+                            "in this repair turn. The next turn will allow changed tool calls."
+                        )
+                        recorder.event("tool_repair_requested", {"call_id": call["id"], "name": call["name"],
+                                                                 "previous_error": previous}, attempt_id=attempt)
+                    if self.config["tool"]["provider"] == "math":
+                        try:
+                            diagnostic = json.loads(result.output).get("same_error_diagnostic")
+                        except (TypeError, ValueError):
+                            diagnostic = None
+                        if diagnostic:
+                            recorder.event("tool_same_error_diagnostic", {
+                                "call_id": call["id"], "name": call["name"], **diagnostic,
+                            }, attempt_id=attempt)
                     tool_message = {"role": "tool", "tool_call_id": call["id"], "content": result.output}
                     state.messages.append(tool_message)
                     state.tool_results.append({"call": call, "result": result.output, "success": result.success})
@@ -569,6 +687,22 @@ class QwenHarnessRuntime(DirectLangChainRuntime):
                         state.messages.append(feedback)
                         recorder.event("feedback_applied", {"source": "tool_failure", "call_id": call["id"],
                                                              "error": result.error}, attempt_id=attempt)
+                if (math_workflow_enabled and math_options.get("stop_on_repetition", False)
+                        and math_evidence.should_finalize):
+                    requested_finalization_reason = "repeated_success"
+                if (math_workflow_enabled and math_options.get("pre_final_audit", False)
+                        and not pre_final_audit_sent and not requested_finalization_reason):
+                    state.messages.append({"role": "user", "content": (
+                        "Before the next calculation or final answer, audit the work so far: "
+                        "compare the copied problem conditions with the original question; "
+                        "state whether the tool result checks those conditions and whether its search "
+                        "range is complete; check any required answer form or sanity invariant. "
+                        "If the result is only intermediate or contradictory, revise the method. "
+                        "Keep this audit brief and continue solving."
+                    )})
+                    pre_final_audit_sent = True
+                    recorder.event("pre_final_audit_prompted", {"after_tool_calls": state.tool_call_count},
+                                   attempt_id=attempt)
                 state.pending_tool_calls = []
                 recorder.checkpoint(state, kind="tool_batch", attempt_id=attempt)
                 set_transition(TransitionKind.CALL_MODEL, "tool batch completed")
@@ -588,33 +722,105 @@ class QwenHarnessRuntime(DirectLangChainRuntime):
                 state.error = {"type": "max_turns", "message": "model turn budget exhausted"}
                 set_transition(TransitionKind.FAIL, "model turn budget exhausted")
                 continue
-            if compaction_checked_turn != state.model_turn_count and context_manager.needs_compaction(state.messages):
+            finalization_enabled = bool(finalization.get("enabled", False))
+            remaining_tokens = max_total_tokens - int(state.usage.get("total_tokens") or state.usage.get("normalized_completion_tokens") or 0)
+            normal_output, final_output = _request_budget(
+                state.messages, tools, remaining_tokens, int(self.profile["max_tokens"]), final_output_tokens,
+            )
+            if (compaction_checked_turn != state.model_turn_count
+                    and context_manager.needs_compaction(state.messages)):
                 set_transition(TransitionKind.COMPACT, "context budget threshold exceeded")
                 continue
-            finalization_enabled = bool(self.features.get("finalization", {}).get("enabled", False))
-            finalization_active = finalization_enabled and state.model_turn_count == max_turns - 1
+            finalization_reason = (
+                requested_finalization_reason or
+                ("model_turns" if state.model_turn_count == max_turns - 1 else
+                "tool_calls" if tool_budget_exhausted or (tools and state.tool_call_count >= max_tool_calls) else
+                "token_reserve" if normal_output < min(2048, int(self.profile["max_tokens"])) else None)
+            )
+            finalization_active = finalization_enabled and (finalization_started or finalization_reason is not None)
+            repair_turn_active = bool(repair_prompt) and not finalization_active
+            if repair_turn_active:
+                state.messages.append({"role": "user", "content": repair_prompt})
+                repair_prompt = None
+            elif repair_prompt and finalization_active:
+                recorder.event("tool_repair_skipped", {"reason": "finalization budget takes priority"}, attempt_id=attempt)
+                repair_prompt = None
             if finalization_active and not finalization_started:
                 finalization_started = True
                 plan_summary = ""
                 if state.current_plan:
                     plan_summary = " Current plan state: " + json.dumps(state.current_plan, ensure_ascii=False)
-                state.messages.append({
-                    "role": "user",
-                    "content": (
-                        "This is the final model turn. Do not call any tools. Use the information and tool "
-                        "results already available to provide the complete final answer in the required format."
-                        + plan_summary
-                    ),
-                })
-                recorder.event("finalization_started", {"model_turn_count": state.model_turn_count}, attempt_id=attempt)
+                if not math_workflow_enabled:
+                    state.messages.append({
+                        "role": "user",
+                        "content": (
+                            "This is the final model turn. Do not call any tools. Use the information and tool "
+                            "results already available to provide the complete final answer in the required format."
+                            + plan_summary
+                        ),
+                    })
+                recorder.event("finalization_started", {"model_turn_count": state.model_turn_count,
+                                                        "reason": finalization_reason,
+                                                        "remaining_tokens": remaining_tokens}, attempt_id=attempt)
+            if finalization_active and math_workflow_enabled:
+                # Original format instructions without obsolete tool/plan requirements.
+                window = int(self.config.get("limits", {}).get("context_window_override") or self.profile["context_window"])
+                input_allowance = max(0, min(remaining_tokens, window) - final_output_tokens - 128)
+                state.messages = math_evidence.final_messages(
+                    self.config["prompt"]["system"], turns[0], state.final_answer,
+                    history=state.messages, max_input_tokens=input_allowance,
+                    strategy=finalization.get("strategy", "adaptive"),
+                )
+                recorder.event("finalization_evidence", state.math_evidence, attempt_id=attempt)
+                recorder.event("finalization_context", math_evidence.finalization_info, attempt_id=attempt)
+                if math_evidence.finalization_info["input_tokens_estimate"] > input_allowance:
+                    state.error = {"type": "token_budget", "message": "original question and final answer reserve do not fit remaining budget"}
+                    set_transition(TransitionKind.FAIL, "protected finalization context exceeds budget")
+                    continue
             before = state.digest()
-            bound = self.model if finalization_active else (
+            request_tools = [] if finalization_active or repair_turn_active else tools
+            request_messages = state.messages
+            if (math_workflow_enabled and math_options.get("concise_progress", False)
+                    and not finalization_active and not repair_turn_active):
+                request_messages = [*request_messages, {"role": "user", "content": (
+                    "Progress rule for this turn: keep visible reasoning brief. State only the key "
+                    "deduction, the current candidate (if any), and the next missing check. "
+                    "Do not enumerate routine cases or repeat earlier derivations in prose; use a "
+                    "bounded tool calculation when needed. A tool result is not proof of the original "
+                    "conditions or complete coverage. If a candidate is ready, verify it and finish "
+                    "with the required #### line."
+                )}]
+            bound = self.model if not request_tools else (
                 self.model.bind_tools([_openai_tool(tool) for tool in tools]) if tools else self.model
             )
-            recorder.event("model_request", {"messages": recorder.bounded_payload(state.messages), "tools": tools},
+            output_limit = int(self.profile["max_tokens"])
+            if finalization_enabled:
+                # Recalculate after adding the final-answer instruction. No tools are advertised then.
+                normal_output, final_output = _request_budget(
+                    request_messages, request_tools, remaining_tokens,
+                    int(self.profile["max_tokens"]), final_output_tokens,
+                )
+                output_limit = final_output if finalization_active else min(normal_output, 512) if repair_turn_active else normal_output
+                window = int(self.config.get("limits", {}).get("context_window_override") or self.profile["context_window"])
+                prompt_estimate = int(1.25 * estimate_tokens([
+                    *request_messages, {"tools": request_tools},
+                ])) + 128
+                output_limit = min(output_limit, max(0, window - prompt_estimate))
+                bounded_turn_cap = int(math_options.get("bounded_turn_max_tokens", 4096))
+                if (math_workflow_enabled and math_options.get("bounded_turns", False)
+                        and not finalization_active and not repair_turn_active):
+                    output_limit = min(output_limit, bounded_turn_cap)
+                if output_limit < 1:
+                    state.error = {"type": "token_budget", "message": "insufficient budget for another model input and answer"}
+                    set_transition(TransitionKind.FAIL, "no request budget remaining")
+                    continue
+                bound = _output_budget(bound, self.profile, output_limit)
+            recorder.event("model_request", {"messages": recorder.bounded_payload(request_messages),
+                                              "tools": request_tools,
+                                              "max_output_tokens": output_limit},
                            attempt_id=attempt, state_before_hash=before)
             response, malformed_retries = await _invoke_with_xml_retry(
-                bound, state.messages, _malformed_retry_limit(self.config)
+                bound, request_messages, _malformed_retry_limit(self.config)
             )
             state.malformed_retry_count += malformed_retries
             value = _serialize_message(response)
@@ -630,14 +836,77 @@ class QwenHarnessRuntime(DirectLangChainRuntime):
                 continue
             state.pending_tool_calls = calls
             text = _content_text(value.get("content"))
-            if text:
+            if text and not repair_turn_active:
                 state.final_answer = text
+                if math_workflow_enabled:
+                    math_evidence.observe_model(text, truncated=_done_reason(value) == "length")
+                    state.math_evidence = math_evidence.snapshot()
             after = state.digest()
             recorder.event("model_response", {"response": value, "tool_calls": calls,
                                                 "stop_reason": _done_reason(value), "usage": state.usage},
                            attempt_id=attempt, state_before_hash=before, state_after_hash=after)
             recorder.checkpoint(state, kind="model_response", attempt_id=attempt)
+            if repair_turn_active:
+                for call in calls:
+                    rejection = {"role": "tool", "tool_call_id": call["id"],
+                                 "content": json.dumps({"success": False, "error_type": "repair_turn_tool_rejected",
+                                                        "message": "Tools are unavailable during the repair turn."})}
+                    state.messages.append(rejection)
+                    serialized.append(rejection)
+                state.pending_tool_calls = []
+                recorder.event("tool_repair_completed", {"response": recorder.bounded_payload(text),
+                                                          "tool_calls_rejected": len(calls)}, attempt_id=attempt)
+                state.messages.append({"role": "user", "content":
+                                       "Now continue with a materially changed calculation or method. "
+                                       "Do not repeat the failed code with only spacing or comment changes."})
+                set_transition(TransitionKind.CALL_MODEL, "tool repair explanation recorded")
+                continue
             if _done_reason(value) == "length":
+                if finalization_active:
+                    state.error = {"type": "output_token_limit", "message": "final answer reached its reserved output limit"}
+                    set_transition(TransitionKind.FAIL, "finalization output truncated")
+                    continue
+                max_continuations = int(math_options.get("bounded_turn_max_continuations", 2))
+                remaining_after = max_total_tokens - int(state.usage.get("total_tokens") or 0)
+                if (finalization_enabled and math_workflow_enabled
+                        and math_options.get("bounded_turns", False)
+                        and output_limit == int(math_options.get("bounded_turn_max_tokens", 4096))
+                        and bounded_turn_continuations < max_continuations
+                        and state.model_turn_count < max_turns - 1
+                        and remaining_after > final_output_tokens + 1024):
+                    bounded_turn_continuations += 1
+                    for call in calls:
+                        message = {"role": "tool", "tool_call_id": call["id"], "content": json.dumps({
+                            "success": False, "error_type": "truncated_tool_call",
+                            "message": "The call was truncated and not executed. Continue with a shorter calculation."
+                        })}
+                        state.messages.append(message)
+                        serialized.append(message)
+                    state.pending_tool_calls = []
+                    state.messages.append({"role": "user", "content": (
+                        "The previous non-final response reached its per-turn cap. Continue solving from "
+                        "the existing work without repeating it. Give one key next step or a bounded tool "
+                        "calculation; keep prose short. If a checked answer is ready, output the required "
+                        "#### line. The final answer turn is still reserved."
+                    )})
+                    recorder.event("bounded_turn_continued", {
+                        "count": bounded_turn_continuations, "max_output_tokens": output_limit,
+                        "remaining_tokens": remaining_after,
+                    }, attempt_id=attempt)
+                    set_transition(TransitionKind.CALL_MODEL, "continue after bounded non-final output")
+                    continue
+                if finalization_enabled:
+                    requested_finalization_reason = "output_limit"
+                    for call in calls:
+                        message = {"role": "tool", "tool_call_id": call["id"], "content": json.dumps({
+                            "success": False, "error_type": "truncated_tool_call",
+                            "message": "The response was truncated; this tool call was not executed. Finish from existing evidence."
+                        })}
+                        state.messages.append(message)
+                        serialized.append(message)
+                    state.pending_tool_calls = []
+                    set_transition(TransitionKind.CALL_MODEL, "reserve final answer after truncated response")
+                    continue
                 set_transition(TransitionKind.RECOVER, "model output reached max_tokens")
                 continue
             if calls and not execute_tools:
@@ -665,7 +934,9 @@ class QwenHarnessRuntime(DirectLangChainRuntime):
                 set_transition(TransitionKind.CALL_MODEL, "plan incomplete")
                 continue
             verification = self.features.get("verification", {})
-            if verification.get("enabled") and not verification_active and state.final_answer:
+            if finalization_active:
+                advance_turn_or_finish()
+            elif verification.get("enabled") and not verification_active and state.final_answer:
                 set_transition(TransitionKind.VERIFY, "final answer requires verification", {"action": "start"})
             elif verification_active:
                 set_transition(TransitionKind.VERIFY, "verification response received", {"action": "finish"})
@@ -693,11 +964,13 @@ class QwenHarnessRuntime(DirectLangChainRuntime):
                       "tool_call_count": state.tool_call_count, "features": self.features,
                       "verification_result": state.verification_result,
                       "compaction_count": compaction_count,
+                      "math_evidence": state.math_evidence,
                       "transition_count": transition_count,
                       "route": route,
                       "router_method": router.get("method", "model_judgment") if router.get("enabled") else None,
                       "router_raw_output": router_raw,
                       "finalization_started": finalization_started,
+                      "finalization_context": getattr(math_evidence, "finalization_info", None),
                       "plan": state.current_plan,
                       "plan_completed": _plan_complete(state.current_plan) if state.current_plan else None},
         )
@@ -710,8 +983,27 @@ class QwenHarnessRuntime(DirectLangChainRuntime):
             runtime_kind=self.runtime_kind, model_profile=self.profile_name,
             sample_id=item["id"], trajectory_id=trajectory_id,
         )
+        memory_feature = self.features.get("memory", {})
+        memory_mode = memory_feature.get("mode", "full_context" if include_conversation else "none")
+        encoder = None
+        if memory_mode == "vector_rag" or (memory_mode == "remem_v1" and memory_feature.get("use_vector", True)):
+            if memory_feature.get("embedding_provider", "sentence_transformers") == "ollama":
+                from Agent.runtime.locomo_context_methods import OllamaEncoder
+                host = os.environ.get(self.profile.get("host_env", "OLLAMA_HOST"),
+                                      self.profile.get("host", "http://127.0.0.1:11434"))
+                encoder = OllamaEncoder(host, memory_feature["embedding_model"])
+            else:
+                try:
+                    from sentence_transformers import SentenceTransformer
+                except ImportError as exc:
+                    raise RuntimeError("vector_rag requires: pip install sentence-transformers") from exc
+                encoder = SentenceTransformer(memory_feature.get("embedding_model", "sentence-transformers/all-MiniLM-L6-v2"))
+        summary_cache: dict[str, str] = {}
+        summary_calls = 0
         conversation = ([message for turn in item["turns"] for message in deepcopy(turn)]
-                        if include_conversation else [])
+                        if memory_mode == "full_context" and not any(
+                            memory_feature.get(k) is False for k in
+                            ("include_dates", "include_speakers", "include_image_captions")) else [])
         answers: list[dict[str, Any]] = []
         serialized: list[dict[str, Any]] = []
         usage = _empty_usage()
@@ -720,9 +1012,31 @@ class QwenHarnessRuntime(DirectLangChainRuntime):
             self.features.get("compaction", {}), self.profile,
             self.config.get("limits", {}).get("context_window_override"),
         )
+        remem = None
+        if memory_mode == "remem_v1":
+            from Agent.runtime.locomo_remem_v1 import EpisodicMemoryV1
+            remem = EpisodicMemoryV1(item, memory_feature, self.model, encoder)
+            await remem.build()
+            recorder.event("memory_constructed", {
+                "nodes": len(remem.nodes), "write_calls": remem.write_calls,
+                "invalid_extractions": remem.invalid_extractions,
+                "write_prompt_tokens": remem.write_prompt_tokens,
+                "write_completion_tokens": remem.write_completion_tokens,
+            }, attempt_id=attempt)
         compaction_count = 0
         for question in item["environment"]["questions"]:
-            messages: list[Any] = ([{"role": "system", "content": system}] if system else []) + conversation + [
+            selected = conversation
+            retrieval_info = {}
+            if remem is not None:
+                context, retrieval_info = remem.retrieve(question["question"])
+                selected = [{"role": "user", "content": context}]
+            elif memory_mode not in {"none"} and not conversation:
+                from Agent.runtime.locomo_context_methods import build_context
+                context, new_calls = await build_context(item, question["question"], memory_feature,
+                                                         self.model, encoder, summary_cache)
+                summary_calls += new_calls
+                selected = [{"role": "user", "content": context}]
+            messages: list[Any] = ([{"role": "system", "content": system}] if system else []) + selected + [
                 {"role": "user", "content": question["question"]}
             ]
             if context_manager.needs_compaction(messages):
@@ -749,7 +1063,7 @@ class QwenHarnessRuntime(DirectLangChainRuntime):
             text = _content_text(value.get("content")) or ""
             serialized.append(value)
             answers.append({"id": question["id"], "category": question["category"],
-                            "answer": text, "tool_calls": []})
+                            "answer": text, "tool_calls": [], "memory_retrieval": retrieval_info})
             recorder.event("model_response", {"response": value, "phase": "context_qa", "usage": _response_usage(value)},
                            attempt_id=attempt)
         recorder.checkpoint({"answers": answers, "usage": usage}, kind="finish", attempt_id=attempt)
@@ -758,7 +1072,13 @@ class QwenHarnessRuntime(DirectLangChainRuntime):
             messages=serialized, usage=usage, timing={"duration_seconds": time.perf_counter() - started},
             metadata={"runtime": self.runtime_kind, "profile": self.profile_name,
                       "trajectory_id": trajectory_id, "locomo_answers": answers,
-                      "locomo_mode": "full_context" if include_conversation else "no_memory",
+                      "locomo_mode": memory_mode,
+                      "summary_generation_calls": summary_calls,
+                      "memory_write_calls": remem.write_calls if remem is not None else 0,
+                      "memory_write_prompt_tokens": remem.write_prompt_tokens if remem is not None else 0,
+                      "memory_write_completion_tokens": remem.write_completion_tokens if remem is not None else 0,
+                      "memory_invalid_extractions": remem.invalid_extractions if remem is not None else 0,
+                      "memory_nodes": len(remem.nodes) if remem is not None else 0,
                       "compaction_count": compaction_count,
                       "features": self.features},
         )

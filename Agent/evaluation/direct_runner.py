@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from decimal import Decimal, InvalidOperation
 import json
+import os
 import re
 import string
 import sys
@@ -75,7 +76,10 @@ async def execute_direct_run(
         is_bfcl_memory = any(
             record.input["metadata"].get("category", "").startswith("memory_") for record in records
         )
-        semaphore = asyncio.Semaphore(1 if is_bfcl_memory else 4)
+        concurrency = 1 if is_bfcl_memory else int(os.environ.get("AGENT_EVAL_CONCURRENCY", "4"))
+        if concurrency < 1:
+            raise ValueError("AGENT_EVAL_CONCURRENCY must be at least 1")
+        semaphore = asyncio.Semaphore(concurrency)
 
         async def process(record: EvaluationRecord) -> AgentOutput:
             async with semaphore:

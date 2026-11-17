@@ -49,6 +49,7 @@ class AgentState:
     tool_results: list[dict[str, Any]] = field(default_factory=list)
     retrieved_memories: list[dict[str, Any]] = field(default_factory=list)
     verification_result: dict[str, Any] | None = None
+    math_evidence: dict[str, Any] = field(default_factory=dict)
     final_answer: str | None = None
     usage: dict[str, int | None] = field(default_factory=lambda: {
         "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0,

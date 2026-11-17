@@ -12,7 +12,9 @@ ArtifactWriter = Callable[[dict[str, Any]], Any]
 
 def estimate_tokens(messages: list[Any]) -> int:
     """Tokenizer-independent estimate used only for context budget decisions."""
-    text = json.dumps(messages, ensure_ascii=False, default=str)
+    def serialize(value: Any) -> Any:
+        return value.model_dump(mode="json") if hasattr(value, "model_dump") else str(value)
+    text = json.dumps(messages, ensure_ascii=False, default=serialize)
     return len(re.findall(r"\w+|[^\w\s]", text, flags=re.UNICODE))
 
 

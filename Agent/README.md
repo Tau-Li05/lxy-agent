@@ -52,6 +52,11 @@ python -m Agent.cli.evaluate_passk --config Agent/configs/v3/aime_qwen_harness.y
 
 `features.parallel_tools` 控制同一模型回合中的外部工具并发，`max_concurrency` 设置上限。Planning 工具保持顺序执行；数学与 GAIA 工具并行运行并实时产生 `tool_started/tool_completed` 事件，结果按原始调用顺序写回。BFCL 官方 batch 因共享状态保持原子执行。`QueryEngine.stream()` 可消费这些事件，并以 `query_completed` 返回最终输出。
 
+单轮数学任务的 `math_tools.workflow_enabled` 启用证据记录。`candidate_protocol`、`cache_successes`、`stop_on_repetition` 独立控制候选协议、成功缓存与重复停止，默认均关闭。`finalization.strategy: history` 保留预算内近期推理与完整工具批次；`adaptive` 仅在有合格、无冲突候选时采用紧凑提取，空候选不再只保留末尾 1200 字符。v5 提供 `aime_qwen_harness_v5_history.yaml` 和 `aime_qwen_harness_v5_adaptive.yaml` 对照配置。
+
+
+
+
 ## 6. 日志与指标
 
 每个 run 在 `runs/<run-name>/`，包含 `manifest.json`、`resolved_config.json`、`samples.jsonl`、`trajectories.jsonl`、`events.jsonl`、`checkpoints.jsonl`、`metric_details.jsonl`、`sample_results.jsonl`、`agent_outputs.jsonl`、`metrics.json` 和 `artifacts/`。manifest 记录模型/provider、配置和数据 hash、feature flags、环境；大文本和网页正文脱敏压缩到 artifacts。缺少 usage、相关性金标或最短路径标注时输出 `unavailable`、原因和 coverage。
@@ -111,3 +116,6 @@ caffeinate -i python -m Agent.cli.evaluate --config Agent/configs/v3/aime_qwen_h
 caffeinate -i python -m Agent.cli.evaluate --config Agent/configs/v3/aime_qwen_harness.yaml --profile qwen3_5_9b --run-name aime-qwen9b-harness
 
 caffeinate -i python -m Agent.cli.evaluate --config Agent/configs/v3/bfcl_multi_qwen_harness.yaml --profile qwen3_5_9b --run-name bfcl_multi-qwen9b-harness
+
+
+caffeinate -i python -m Agent.cli.evaluate --config Agent/configs/v3/aime_direct.yaml --profile qwen3_5_9b --run-name aime-qwen9b-direct

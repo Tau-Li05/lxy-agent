@@ -13,7 +13,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--limit", type=int, help="evaluate only the first N records")
     parser.add_argument("--profile", help="override model.default_profile")
     parser.add_argument("--run-name", help="explicit run directory name (required to keep multiple ablations)")
-    parser.add_argument("--math-tools", choices=["none", "python", "python_sympy"], help="math-tool ablation")
+    parser.add_argument("--math-tools", choices=["none", "python", "python_sympy", "python_exact"], help="math-tool ablation")
     parser.add_argument("--verification", choices=["none", "self", "python", "python_sympy"], help="verification ablation")
     parser.add_argument("--planning", choices=["on", "off"], help="planning feature override")
     parser.add_argument("--compaction", choices=["on", "off"], help="compaction feature override")

@@ -37,8 +37,10 @@ def _validate_v3_semantics(value: dict[str, Any], path: Path) -> None:
     tools = features.get("tools", {"enabled": False, "execution": False})
     if tools["execution"] and not tools["enabled"]:
         raise ValueError(f"{path}: features.tools.execution requires features.tools.enabled")
+    context_memory_modes = {"full_context", "recent_window", "bm25_rag", "vector_rag", "session_summary", "remem_v1", "none"}
     for name in ("web_search", "memory"):
-        if features.get(name, {}).get("enabled") and not tools["enabled"]:
+        context_memory = name == "memory" and features.get(name, {}).get("mode") in context_memory_modes
+        if features.get(name, {}).get("enabled") and not tools["enabled"] and not context_memory:
             raise ValueError(f"{path}: features.{name}.enabled requires features.tools.enabled")
     kind = value["runtime"]["kind"]
     compaction = features.get("compaction", {})

@@ -442,6 +442,7 @@ class RuntimeV3Tests(unittest.IsolatedAsyncioTestCase):
     async def test_qwen_profiles_share_math_harness(self) -> None:
         path = AGENT_ROOT / "configs/v3/aime_qwen_harness.yaml"
         config = load_run_config(path, AGENT_ROOT)
+        config["features"]["difficulty_router"] = {"enabled": True}
         record = load_evaluation_dataset(resolve_path(config["dataset"]["path"], path, ROOT), AGENT_ROOT, config)[0]
         model = SequenceModel(
             FakeMessage("AGENT"),

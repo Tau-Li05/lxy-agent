@@ -67,7 +67,11 @@
             "require_verification_task": {"type": "boolean"}
           }
         },
-        "finalization": {"$ref": "#/$defs/switch"},
+        "finalization": {
+          "type": "object", "required": ["enabled"], "additionalProperties": false,
+          "properties": {"enabled": {"type": "boolean"}, "max_tokens": {"type": "integer", "minimum": 1},
+                         "strategy": {"enum": ["adaptive", "history"]}}
+        },
         "difficulty_router": {
           "type": "object", "required": ["enabled"], "additionalProperties": false,
           "properties": {
@@ -99,7 +103,16 @@
         },
         "memory": {
           "type": "object", "required": ["enabled"], "additionalProperties": false,
-          "properties": {"enabled": {"type": "boolean"}, "mode": {"enum": ["full_context", "persistent", "bfcl_protocol", "none"]}}
+          "properties": {"enabled": {"type": "boolean"}, "mode": {"enum": ["full_context", "recent_window", "bm25_rag", "vector_rag", "session_summary", "remem_v1", "persistent", "bfcl_protocol", "none"]},
+            "top_k": {"type": "integer", "minimum": 1}, "chunk_turns": {"type": "integer", "minimum": 1},
+            "max_chars": {"type": "integer", "minimum": 1}, "embedding_model": {"type": "string", "minLength": 1},
+            "embedding_provider": {"enum": ["sentence_transformers", "ollama"]},
+            "use_gists": {"type": "boolean"}, "use_time": {"type": "boolean"},
+            "use_graph": {"type": "boolean"}, "graph_steps": {"type": "integer", "minimum": 0, "maximum": 1},
+            "graph_extra": {"type": "integer", "minimum": 0}, "use_vector": {"type": "boolean"},
+            "use_raw_backtrace": {"type": "boolean"},
+            "include_dates": {"type": "boolean"}, "include_speakers": {"type": "boolean"},
+            "include_image_captions": {"type": "boolean"}}
         },
         "tools": {
           "type": "object", "required": ["enabled", "execution"], "additionalProperties": false,
@@ -114,7 +127,20 @@
         },
         "math_tools": {
           "type": "object", "required": ["mode"], "additionalProperties": false,
-          "properties": {"mode": {"enum": ["none", "python", "python_sympy"]}}
+          "properties": {
+            "mode": {"enum": ["none", "python", "python_sympy", "python_exact"]},
+            "timeout_seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 60},
+            "workflow_enabled": {"type": "boolean"},
+            "candidate_protocol": {"type": "boolean"},
+            "cache_successes": {"type": "boolean"},
+            "repair_turn_enabled": {"type": "boolean"},
+            "pre_final_audit": {"type": "boolean"},
+            "concise_progress": {"type": "boolean"},
+            "bounded_turns": {"type": "boolean"},
+            "bounded_turn_max_tokens": {"type": "integer", "minimum": 512},
+            "bounded_turn_max_continuations": {"type": "integer", "minimum": 0, "maximum": 8},
+            "stop_on_repetition": {"type": "boolean"}
+          }
         },
         "output_recovery": {
           "type": "object", "required": ["enabled", "max_retries"], "additionalProperties": false,

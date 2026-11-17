@@ -18,6 +18,13 @@ from Agent.evaluation.io import stable_json
 SCHEMA_VERSION = "1.0"
 NORMALIZED_TOKENIZER = "unicode-wordpunct-v1"
 _SECRET_KEYS = re.compile(r"(?:api[_-]?key|authorization|token|secret|password|cookie)", re.I)
+# Explicit numeric telemetry only. Authentication fields are never exempted.
+_NUMERIC_TOKEN_FIELDS = frozenset({
+    "prompt_tokens", "completion_tokens", "total_tokens", "input_tokens", "output_tokens",
+    "provider_reasoning_tokens", "visible_step_tokens", "normalized_completion_tokens",
+    "max_output_tokens", "remaining_tokens", "original_tokens_estimate",
+    "compacted_tokens_estimate", "input_tokens_estimate", "reserved_output_tokens",
+})
 _FILE_LOCK = threading.Lock()
 
 
@@ -29,6 +36,8 @@ def normalized_token_count(value: str) -> int:
 def _jsonable(value: Any) -> Any:
     if is_dataclass(value):
         return _jsonable(asdict(value))
+    if hasattr(value, "model_dump"):
+        return _jsonable(value.model_dump(mode="json"))
     if isinstance(value, dict):
         return {str(key): _jsonable(child) for key, child in value.items()}
     if isinstance(value, (list, tuple)):
@@ -41,7 +50,8 @@ def _jsonable(value: Any) -> Any:
 def redact(value: Any) -> Any:
     if isinstance(value, dict):
         return {
-            str(key): "[REDACTED]" if _SECRET_KEYS.search(str(key)) else redact(child)
+            str(key): (child if str(key) in _NUMERIC_TOKEN_FIELDS and type(child) in {int, float}
+                       else "[REDACTED]" if _SECRET_KEYS.search(str(key)) else redact(child))
             for key, child in value.items()
         }
     if isinstance(value, list):
